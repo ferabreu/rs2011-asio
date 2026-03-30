@@ -134,5 +134,3 @@ void PatchOriginalCode()
 			break;
 	}
 }
-
-}
