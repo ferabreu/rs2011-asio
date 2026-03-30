@@ -1,7 +1,6 @@
 #include "stdafx.h"
 #include "dllmain.h"
 #include "Patcher.h"
-#include "RSAsioAudioClient.h"
 
 // Patch code for Rocksmith (2011), CRC32 0xe0f686e0
 //
@@ -95,10 +94,6 @@ static HRESULT STDAPICALLTYPE Patched_CoGetInterfaceAndReleaseStream(
 void PatchOriginalCode_e0f686e0()
 {
 	rslog::info_ts() << __FUNCTION__ << " - patching Rocksmith 2011 via IAT" << std::endl;
-
-	// Rocksmith 2011 uses WASAPI in polling mode (no event callbacks, possibly shared mode).
-	// Tell RSAsioAudioClient to expect this so it doesn't show confusing RS2014 warning dialogs.
-	RSAsioAudioClient_SetPollingModeExpected(true);
 
 	bool ok = true;
 

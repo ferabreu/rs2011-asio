@@ -4,16 +4,6 @@
 
 #include "AsioSharedHost.h"
 
-// Set to true for games that use WASAPI in polling mode (e.g. Rocksmith 2011).
-// Rocksmith 2011 uses ExclusiveMode=1 but has no Win32UltraLowLatencyMode setting,
-// so it never passes AUDCLNT_STREAMFLAGS_EVENTCALLBACK. This suppresses the
-// misleading "Did you set Win32UltraLowLatencyMode=1?" warning dialog.
-static bool s_expectPollingMode = false;
-
-void RSAsioAudioClient_SetPollingModeExpected(bool expected)
-{
-	s_expectPollingMode = expected;
-}
 #include "RSAsioDevice.h"
 #include "RSAsioAudioClient.h"
 #include "RSAsioAudioRenderClient.h"
@@ -84,16 +74,6 @@ HRESULT RSAsioAudioClient::Initialize(AUDCLNT_SHAREMODE ShareMode, DWORD StreamF
 	std::lock_guard<std::mutex> g(m_controlMutex);
 
 	const bool useEventCallback = StreamFlags & AUDCLNT_STREAMFLAGS_EVENTCALLBACK;
-
-	static bool isFirstTimeCalled = true;
-	if (isFirstTimeCalled)
-	{
-		if (!useEventCallback && !s_expectPollingMode)
-		{
-			MessageBox(GetGameWindow(), TEXT("Tried to initialize audio without using an event callback.\nDid you set Win32UltraLowLatencyMode=1 in Rocksmith.ini?"), TEXT("RS-ASIO Error"), MB_OK | MB_ICONERROR);
-		}
-		isFirstTimeCalled = false;
-	}
 
 	if (!pFormat)
 		return E_POINTER;

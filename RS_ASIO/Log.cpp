@@ -36,7 +36,7 @@ namespace rslog
 	void InitLog()
 	{
 #if !LOG_TO_CONSOLE
-		logFileBuffer.open("RS_ASIO-log.txt", std::ios_base::out | std::ios_base::trunc);
+		logFileBuffer.open("RS_ASIO.log", std::ios_base::out | std::ios_base::trunc);
 		initTimeStamp = TimeStamp();
 #else
 		AllocConsole();
