@@ -45,6 +45,8 @@ The same instructions should work for Rocksmith 2011 as well.
 
 Additional information about how RS2011-ASIO works, and how to configure it, can be found in the [technical details document](docs/tech-details.md). This includes information about how the WASAPI redirect works and how to match the `WasapiDevice` setting.
 
+---
+
 ## Credits
 
 Developed with the assistance of GitHub Copilot, Claude Sonnet 4.6 and Claude Haiku 4.5, based on my specs.
