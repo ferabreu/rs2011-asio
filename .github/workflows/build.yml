@@ -14,4 +14,19 @@ jobs:
     - name: Setup MSBuild.exe
       uses: microsoft/setup-msbuild@v1.0.2
     - name: Build with MSBuild
-      run: msbuild  '.\RS_ASIO.sln'
+      run: msbuild  '.\RS_ASIO.sln' /p:Configuration=Release /p:Platform=x86
+    - name: Create Release Package
+      run: |
+        mkdir RS2011-ASIO-Release
+        copy "RS_ASIO\Release\RS_ASIO.dll" "RS2011-ASIO-Release\"
+        copy "avrt\Release\avrt.dll" "RS2011-ASIO-Release\"
+        copy "dist\RS_ASIO.ini" "RS2011-ASIO-Release\"
+        copy "LICENSE" "RS2011-ASIO-Release\"
+        copy "README.md" "RS2011-ASIO-Release\"
+        powershell -Command "Compress-Archive -Path 'RS2011-ASIO-Release' -DestinationPath 'RS2011-ASIO-release.zip'"
+    - name: Upload Release Assets
+      uses: softprops/action-gh-release@v1
+      with:
+        files: RS2011-ASIO-release.zip
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
