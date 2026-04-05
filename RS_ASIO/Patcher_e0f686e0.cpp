@@ -229,7 +229,7 @@ static HKEY WINAPI Patched_SetupDiOpenDeviceInterfaceRegKey(
 	if (DeviceInfoSet == FAKE_DEVINFO)
 	{
 		SetLastError(ERROR_NOT_FOUND);
-		return INVALID_HANDLE_VALUE;
+		return reinterpret_cast<HKEY>(INVALID_HANDLE_VALUE);
 	}
 	return SetupDiOpenDeviceInterfaceRegKey(DeviceInfoSet, DeviceInterfaceData, Reserved, samDesired);
 }
