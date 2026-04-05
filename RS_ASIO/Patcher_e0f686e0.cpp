@@ -147,7 +147,10 @@ static HDEVINFO WINAPI Patched_SetupDiGetClassDevsW(
 static HDEVINFO WINAPI Patched_SetupDiGetClassDevsA(
     const GUID* ClassGuid, PCSTR Enumerator, HWND hwndParent, DWORD Flags)
 {
-	rslog::info_ts() << "Patched_SetupDiGetClassDevsA called" << std::endl;
+	if (ClassGuid)
+		rslog::info_ts() << "Patched_SetupDiGetClassDevsA - ClassGuid: " << *ClassGuid << std::endl;
+	else
+		rslog::info_ts() << "Patched_SetupDiGetClassDevsA - ClassGuid: (null)" << std::endl;
 	return FAKE_DEVINFO;
 }
 
@@ -268,14 +271,24 @@ static BOOL WINAPI Patched_SetupDiGetDeviceInterfaceAlias(
     HDEVINFO DeviceInfoSet, PSP_DEVICE_INTERFACE_DATA DeviceInterfaceData,
     const GUID* AliasInterfaceClassGuid, PSP_DEVICE_INTERFACE_DATA AliasDeviceInterfaceData)
 {
-	rslog::info_ts() << "Patched_SetupDiGetDeviceInterfaceAlias called" << std::endl;
-	if (DeviceInfoSet == FAKE_DEVINFO)
+	if (AliasInterfaceClassGuid)
+		rslog::info_ts() << "Patched_SetupDiGetDeviceInterfaceAlias - AliasGuid: " << *AliasInterfaceClassGuid << std::endl;
+	else
+		rslog::info_ts() << "Patched_SetupDiGetDeviceInterfaceAlias - AliasGuid: (null)" << std::endl;
+
+	if (DeviceInfoSet != FAKE_DEVINFO)
+		return SetupDiGetDeviceInterfaceAlias(DeviceInfoSet, DeviceInterfaceData,
+		    AliasInterfaceClassGuid, AliasDeviceInterfaceData);
+
+	// Report that the alias exists and is active so the game proceeds to GetDeviceInterfaceDetailW.
+	if (AliasDeviceInterfaceData)
 	{
-		SetLastError(ERROR_NOT_FOUND);
-		return FALSE;
+		AliasDeviceInterfaceData->cbSize = sizeof(SP_DEVICE_INTERFACE_DATA);
+		AliasDeviceInterfaceData->InterfaceClassGuid = AliasInterfaceClassGuid ? *AliasInterfaceClassGuid : GUID_KSCATEGORY_CAPTURE;
+		AliasDeviceInterfaceData->Flags = SPINT_ACTIVE;
+		AliasDeviceInterfaceData->Reserved = 0;
 	}
-	return SetupDiGetDeviceInterfaceAlias(DeviceInfoSet, DeviceInterfaceData,
-	    AliasInterfaceClassGuid, AliasDeviceInterfaceData);
+	return TRUE;
 }
 
 void PatchOriginalCode_e0f686e0()
