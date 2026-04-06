@@ -28,6 +28,9 @@
 //   SetupDiGetDeviceInterfaceAlias        RVA 0x0088d2d0  (setupapi.dll)
 //   SetupDiGetClassDevsA                  RVA 0x0088d2d4  (setupapi.dll)
 //   SetupDiEnumDeviceInterfaces           RVA 0x0088d2d8  (setupapi.dll)
+//
+//   RegQueryValueExW                      RVA 0x0088d000  (advapi32.dll)
+//   RegCloseKey                           RVA 0x0088d004  (advapi32.dll)
 
 // Known IAT RVAs - these are fixed offsets from the module base and do not change
 // because the executable does not use ASLR (ImageBase is fixed at 0x00400000).
@@ -44,10 +47,21 @@ static const DWORD IAT_RVA_SetupDiGetDeviceInterfaceAlias   = 0x0088d2d0;
 static const DWORD IAT_RVA_SetupDiGetClassDevsA             = 0x0088d2d4;
 static const DWORD IAT_RVA_SetupDiEnumDeviceInterfaces      = 0x0088d2d8;
 
+static const DWORD IAT_RVA_RegQueryValueExW = 0x0088d000;
+static const DWORD IAT_RVA_RegCloseKey      = 0x0088d004;
+
 // Sentinel value used as an HDEVINFO handle for our fake cable device set.
 // Must not collide with real heap pointers; RS2011 is 32-bit and heap starts well
 // above 0x10000, so a small constant is safe.
 static const HDEVINFO FAKE_DEVINFO = reinterpret_cast<HDEVINFO>(static_cast<ULONG_PTR>(0xC0FFEE01));
+
+// Sentinel HKEY for our fake cable's device interface registry key.
+static const HKEY FAKE_CABLE_HKEY = reinterpret_cast<HKEY>(static_cast<ULONG_PTR>(0xC0FFEE02));
+
+// The WASAPI endpoint ID for the fake cable device - written under every plausible
+// value name so whatever key name the game reads, it will get the right ID.
+static const wchar_t FAKE_WASAPI_ENDPOINT_ID[] =
+    L"{0.0.1.00000000}.{21D5646C-D708-4E90-A57A-E1956015D4F3}";
 
 // Device interface path that the game will parse for VID_12BA&PID_00FF.
 // The GUID suffix must match KSCATEGORY_CAPTURE = {65E8773D-8F56-11D0-A3B9-00A0C9223196}.
@@ -230,11 +244,44 @@ static HKEY WINAPI Patched_SetupDiOpenDeviceInterfaceRegKey(
 {
 	rslog::info_ts() << "Patched_SetupDiOpenDeviceInterfaceRegKey called" << std::endl;
 	if (DeviceInfoSet == FAKE_DEVINFO)
-	{
-		SetLastError(ERROR_NOT_FOUND);
-		return reinterpret_cast<HKEY>(INVALID_HANDLE_VALUE);
-	}
+		return FAKE_CABLE_HKEY;
 	return SetupDiOpenDeviceInterfaceRegKey(DeviceInfoSet, DeviceInterfaceData, Reserved, samDesired);
+}
+
+static LONG WINAPI Patched_RegQueryValueExW(
+    HKEY hKey, LPCWSTR lpValueName, LPDWORD lpReserved,
+    LPDWORD lpType, LPBYTE lpData, LPDWORD lpcbData)
+{
+	if (hKey != FAKE_CABLE_HKEY)
+		return RegQueryValueExW(hKey, lpValueName, lpReserved, lpType, lpData, lpcbData);
+
+	rslog::info_ts() << "Patched_RegQueryValueExW (fake cable key) - ValueName: "
+	                 << (lpValueName ? lpValueName : L"(null)") << std::endl;
+
+	// Return the WASAPI endpoint ID under any value name the game asks for.
+	// The game reads some registry value from the device interface key to resolve
+	// the USB device path to a WASAPI endpoint - we always return our fake endpoint ID.
+	DWORD needed = static_cast<DWORD>((wcslen(FAKE_WASAPI_ENDPOINT_ID) + 1) * sizeof(WCHAR));
+	if (lpType) *lpType = REG_SZ;
+	if (lpcbData)
+	{
+		DWORD available = *lpcbData;
+		*lpcbData = needed;
+		if (!lpData)
+			return ERROR_SUCCESS;
+		if (available < needed)
+			return ERROR_MORE_DATA;
+	}
+	if (lpData)
+		memcpy(lpData, FAKE_WASAPI_ENDPOINT_ID, needed);
+	return ERROR_SUCCESS;
+}
+
+static LONG WINAPI Patched_RegCloseKey(HKEY hKey)
+{
+	if (hKey == FAKE_CABLE_HKEY)
+		return ERROR_SUCCESS;
+	return RegCloseKey(hKey);
 }
 
 static BOOL WINAPI Patched_SetupDiGetDeviceRegistryPropertyW(
@@ -333,6 +380,13 @@ void PatchOriginalCode_e0f686e0()
 	ok &= PatchIATEntry(IAT_RVA_SetupDiEnumDeviceInterfaces,
 	                    reinterpret_cast<void*>(&Patched_SetupDiEnumDeviceInterfaces),
 	                    "SetupDiEnumDeviceInterfaces");
+
+	ok &= PatchIATEntry(IAT_RVA_RegQueryValueExW,
+	                    reinterpret_cast<void*>(&Patched_RegQueryValueExW),
+	                    "RegQueryValueExW");
+	ok &= PatchIATEntry(IAT_RVA_RegCloseKey,
+	                    reinterpret_cast<void*>(&Patched_RegCloseKey),
+	                    "RegCloseKey");
 
 	if (!ok)
 	{
