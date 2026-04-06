@@ -258,10 +258,14 @@ static LONG WINAPI Patched_RegQueryValueExW(
 	rslog::info_ts() << "Patched_RegQueryValueExW (fake cable key) - ValueName: "
 	                 << (lpValueName ? lpValueName : L"(null)") << std::endl;
 
-	// Return the WASAPI endpoint ID under any value name the game asks for.
-	// The game reads some registry value from the device interface key to resolve
-	// the USB device path to a WASAPI endpoint - we always return our fake endpoint ID.
-	DWORD needed = static_cast<DWORD>((wcslen(FAKE_WASAPI_ENDPOINT_ID) + 1) * sizeof(WCHAR));
+	// The game reads "FriendlyName" from the device interface registry key to match
+	// the USB device against the WASAPI endpoint found during enumeration.
+	// Return the same friendly name that the fake WASAPI device reports so the match succeeds.
+	const wchar_t* value = FAKE_WASAPI_ENDPOINT_ID;
+	if (lpValueName && _wcsicmp(lpValueName, L"FriendlyName") == 0)
+		value = L"Rocksmith Guitar Adapter Mono";
+
+	DWORD needed = static_cast<DWORD>((wcslen(value) + 1) * sizeof(WCHAR));
 	if (lpType) *lpType = REG_SZ;
 	if (lpcbData)
 	{
@@ -273,7 +277,7 @@ static LONG WINAPI Patched_RegQueryValueExW(
 			return ERROR_MORE_DATA;
 	}
 	if (lpData)
-		memcpy(lpData, FAKE_WASAPI_ENDPOINT_ID, needed);
+		memcpy(lpData, value, needed);
 	return ERROR_SUCCESS;
 }
 
