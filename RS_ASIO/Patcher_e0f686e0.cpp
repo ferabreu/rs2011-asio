@@ -460,16 +460,13 @@ static BOOL WINAPI Patched_DeviceIoControl(
 		                 << " inSize: " << nInBufferSize << " outSize: " << nOutBufferSize
 		                 << " in[" << inHex << "]" << std::endl;
 
-		// KSPROPERTY_GENERAL_COMPONENTID (KSPROPSETID_General, Id=0) is a fixed-size
-		// property returning a KSCOMPONENTID struct — NOT a KSMULTIPLE_ITEM.
-		// The game checks Manufacturer (USB VID) and Product (USB PID) against the Real
-		// Tone Cable values before deciding to activate WASAPI capture. Any other value
-		// causes the game to silently skip capture for the entire session.
+		// Handle specific KS properties by property-set GUID + property Id.
 		//
-		// KSPROPERTY_PIN_DATAFLOW (KSPROPSETID_Pin, Id=7) must return KSPIN_DATAFLOW_OUT=2
-		// for the capture device's streaming pin. The generic "return DWORD=1" path returns
-		// KSPIN_DATAFLOW_IN=1, which tells the game this is a render pin and causes it to
-		// skip the device for capture activation.
+		// KSPROPERTY_GENERAL_COMPONENTID (KSPROPSETID_General, Id=0): fixed-size struct.
+		// The game checks Manufacturer (USB VID=0x12BA) and Product (USB PID=0x00FF).
+		//
+		// KSPROPSETID_Pin properties (Id=2 DATAFLOW, Id=5 INTERFACES, Id=7 COMMUNICATION)
+		// must reflect a valid capture streaming pin or the game skips the device entirely.
 		if (nInBufferSize >= sizeof(GUID) + sizeof(ULONG) && lpInBuffer)
 		{
 			const GUID& propSet = *reinterpret_cast<const GUID*>(lpInBuffer);
@@ -487,37 +484,64 @@ static BOOL WINAPI Patched_DeviceIoControl(
 				return TRUE;
 			}
 
-			// KSPROPERTY_PIN_DATAFLOW (Id=7): must be KSPIN_DATAFLOW_OUT=2 for a capture pin.
-			// KSPROPSETID_Pin = {8C134960-51AD-11CF-878A-94F801C10000}
-			static const GUID GUID_KSPROPSETID_Pin =
-			    { 0x8C134960, 0x51AD, 0x11CF, { 0x87, 0x8A, 0x94, 0xF8, 0x01, 0xC1, 0x00, 0x00 } };
-			if (IsEqualGUID(propSet, GUID_KSPROPSETID_Pin) && propId == 7 /* KSPROPERTY_PIN_DATAFLOW */)
+		// KSPROPSETID_Pin = {8C134960-51AD-11CF-878A-94F801C10000}
+		static const GUID GUID_KSPROPSETID_Pin =
+		    { 0x8C134960, 0x51AD, 0x11CF, { 0x87, 0x8A, 0x94, 0xF8, 0x01, 0xC1, 0x00, 0x00 } };
+		if (IsEqualGUID(propSet, GUID_KSPROPSETID_Pin))
+		{
+			if (propId == 2 /* KSPROPERTY_PIN_DATAFLOW */)
 			{
-				// KSPIN_DATAFLOW_OUT = 2: data flows out of the pin to the application (capture).
+				// KSPIN_DATAFLOW_OUT=2: audio flows out of the filter toward the application (capture).
 				if (lpBytesReturned) *lpBytesReturned = sizeof(DWORD);
 				if (lpOutBuffer && nOutBufferSize >= sizeof(DWORD))
-					*reinterpret_cast<DWORD*>(lpOutBuffer) = 2;
+					*reinterpret_cast<DWORD*>(lpOutBuffer) = 2; // KSPIN_DATAFLOW_OUT
 				return TRUE;
+			}
+			if (propId == 5 /* KSPROPERTY_PIN_INTERFACES */)
+			{
+				// Return one KSIDENTIFIER for KSINTERFACE_STANDARD_STREAMING.
+				// KSMULTIPLE_ITEM (8 bytes) + KSIDENTIFIER (24 bytes) = 32 bytes total.
+				static const ULONG kIfaceBytes =
+				    2 * sizeof(ULONG) + sizeof(GUID) + 2 * sizeof(ULONG); // = 32
+				if (nOutBufferSize == 0)
+				{
+					if (lpBytesReturned) *lpBytesReturned = kIfaceBytes;
+					SetLastError(ERROR_MORE_DATA);
+					return FALSE;
+				}
+				if (lpBytesReturned) *lpBytesReturned = kIfaceBytes;
+				if (lpOutBuffer && nOutBufferSize >= kIfaceBytes)
+				{
+					BYTE* const buf = reinterpret_cast<BYTE*>(lpOutBuffer);
+					ULONG* hdr = reinterpret_cast<ULONG*>(buf);
+					hdr[0] = kIfaceBytes; // KSMULTIPLE_ITEM.Size
+					hdr[1] = 1;           // KSMULTIPLE_ITEM.Count = 1 interface
+					// KSIDENTIFIER: Set=KSINTERFACE_STANDARD {1A8766A0-62CE-11CF-A5D6-28DB04C10000}
+					//               Id=0 (KSINTERFACE_STANDARD_STREAMING), Flags=0
+					static const GUID kStdIface =
+					    { 0x1A8766A0, 0x62CE, 0x11CF, { 0xA5, 0xD6, 0x28, 0xDB, 0x04, 0xC1, 0x00, 0x00 } };
+					*reinterpret_cast<GUID*>(buf + 8) = kStdIface;
+					ULONG* idflags = reinterpret_cast<ULONG*>(buf + 8 + sizeof(GUID));
+					idflags[0] = 0; // Id = KSINTERFACE_STANDARD_STREAMING
+					idflags[1] = 0; // Flags
+				}
+				return TRUE;
+			}
+			if (propId == 7 /* KSPROPERTY_PIN_COMMUNICATION */)
+			{
+				// KSPIN_COMMUNICATION_SINK=1: the application connects directly to this pin.
+				if (lpBytesReturned) *lpBytesReturned = sizeof(DWORD);
+				if (lpOutBuffer && nOutBufferSize >= sizeof(DWORD))
+					*reinterpret_cast<DWORD*>(lpOutBuffer) = 1; // KSPIN_COMMUNICATION_SINK
+				return TRUE;
+			}
 			}
 		}
 
-		// Many KS property gets use a two-phase size protocol:
-		//   Phase 1 (probe): caller passes outSize=0 → driver returns FALSE+ERROR_MORE_DATA
-		//                    and sets *lpBytesReturned to the needed buffer size.
-		//   Phase 2 (fetch): caller allocates that many bytes and calls again.
-		//
-		// This applies to ALL variable-length KS properties regardless of property set
-		// (KSPROPSETID_Topology connections/nodes, KSPROPSETID_Pin interfaces/mediums/
-		// dataranges, etc.). Returning TRUE+0 for a probe causes the caller to allocate
-		// 0 bytes, misparse the result as KSMULTIPLE_ITEM, and crash.
-		//
-		// Unified strategy by outSize:
-		//   outSize=0  → size probe for any variable-length property.
-		//                 Return ERROR_MORE_DATA and report sizeof(KSMULTIPLE_ITEM)=8 needed.
-		//   outSize=4  → fixed DWORD property (CTYPES, COMMUNICATION...).
-		//                 Return DWORD=1. DATAFLOW is intercepted above and returns 2 (OUT).
-		//   outSize≥8  → variable-length property with caller-provided buffer.
-		//                 Return an empty KSMULTIPLE_ITEM {Size=8, Count=0}.
+		// Unified strategy by outSize for any property not handled above:
+		//   outSize=0  → size probe.  Return ERROR_MORE_DATA + 8 bytes needed.
+		//   outSize=4  → DWORD property (e.g. KSPROPERTY_PIN_CTYPES).  Return DWORD=1.
+		//   outSize≥8  → variable-length property.  Return empty KSMULTIPLE_ITEM {Size=8,Count=0}.
 
 		static const ULONG KS_MULTIPLE_ITEM_SIZE = 2 * sizeof(ULONG); // Size + Count fields
 
