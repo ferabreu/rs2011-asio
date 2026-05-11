@@ -1,4 +1,4 @@
-# rocksmith-on-linux
+![rocksmith-on-linux](assets/rocksmith-logo-terminal.png)[^1]
 
 This project aims to add ASIO support to Ubisoft's **Rocksmith**, allowing the game to be run on Linux, using Steam/Proton, Pipewire (or JACK), and WineASIO.
 
@@ -83,3 +83,5 @@ I have also included a good portion of my "development conversation" with GitHub
 Developed with the assistance of GitHub Copilot, Claude Sonnet 4.6 and Claude Haiku 4.5, based on my specs.
 
 This project is a fork of [RS ASIO](https://github.com/mdias/rs_asio), by Micael Dias, without which this project would not be possible. RS ASIO is still being maintained and developed, and I recommend checking it out if you want to use ASIO with Rocksmith 2014.
+
+[^1]: The logo is a modified version of the original Rocksmith logo, created by Ubisoft. The logo and branding are protected, meaning they cannot be used for commercial purposes without authorization from Ubisoft. This project is an independent effort and is not affiliated with, endorsed by, or approved by Ubisoft. The logo is used here for informational purposes only, to indicate that the project is related to Rocksmith.
